@@ -10,6 +10,10 @@ import org.matsim.core.network.NetworkUtils;
 import org.matsim.munichArea.configMatsim.Zone2ZoneTravelDistanceListener;
 import sun.nio.ch.Net;
 
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.ResourceBundle;
 
@@ -28,12 +32,23 @@ public class RoadBuilder {
 
         this.network = network;
         //create new nodes
-        //example node n1
+
+        //read nodes
+        readAndCreateNodes();
+
+        //read links
+        readAndCreateLinks();
+
+
+
+
+       /* //example node n1
         double x1 = 4541826;
         double y1 = 5302196;
         Coord c1 = new Coord(x1, y1);
         Node n1 = NetworkUtils.createNode(Id.createNodeId("node1"), c1);
         network.addNode(n1);
+
         //example node n2
         double x2 = 4542289;
         double y2 = 5301248;
@@ -47,7 +62,7 @@ public class RoadBuilder {
         //remove two links because the new roads intersects them
 
 
-        //get node from its id
+        //get link from its id
         Link l1 = network.getLinks().get(Id.createLinkId(141381));
         log.info("A node has been found by its id : " + l1.getToNode().getId().toString());
 
@@ -103,9 +118,266 @@ public class RoadBuilder {
                 network.addLink(centerLink);
             }
         }
+        */
     }
 
     public Network getNetwork() {
         return network;
     }
+
+
+    public void readAndCreateNodes(){
+        String fileName = rb.getString("editor.nodes.file");
+        String cvsSplitBy = ",";
+        BufferedReader br = null;
+        String line = "";
+
+        try {
+            int lineIndex = 0;
+            br = new BufferedReader(new FileReader(fileName));
+            while ((line = br.readLine()) != null ) {
+                String[] row = line.split(cvsSplitBy);
+                if(lineIndex > 0) {
+                    int id = Integer.parseInt(row[0]);
+                    double x = Double.parseDouble(row[1]);
+                    double y = Double.parseDouble(row[2]);
+                    Coord coordinatesNode = new Coord(x, y);
+                    Node node = NetworkUtils.createNode(Id.createNodeId(id), coordinatesNode);
+                    network.addNode(node);
+                }
+                lineIndex++;
+            }
+
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (br != null) {
+                try {
+                    br.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+        }
+    }
+
+    public void readAndCreateLinks(){
+        String fileName = rb.getString("editor.links.file");
+        String cvsSplitBy = ",";
+        BufferedReader br = null;
+        String line = "";
+
+        try {
+            int lineIndex = 0;
+            br = new BufferedReader(new FileReader(fileName));
+            while ((line = br.readLine()) != null ) {
+                String[] row = line.split(cvsSplitBy);
+                if(lineIndex > 0) {
+                    String newLinkId= row[0];
+                    long fromNodeId = Long.parseLong(row[1]);
+                    long toNodeId = Long.parseLong(row[2]);
+                    double freeSpeed = Double.parseDouble(row[3]);
+                    double capacity = Double.parseDouble(row[4]);
+                    int lanes = Integer.parseInt(row[5]);
+                    int oneWay = Integer.parseInt(row[6]);
+                    String type = row[8];
+                    int intersection = Integer.parseInt(row[9]);
+                    long intLinkId = Long.parseLong(row[10]);
+
+                    Node fromNode = network.getNodes().get(Id.createNodeId(fromNodeId));
+                    Node toNode = network.getNodes().get(Id.createNodeId(toNodeId));
+
+                    if (intersection == 0) {
+
+                        Link link;
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId),
+                                fromNode,
+                                toNode,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId + "op"),
+                                toNode,
+                                fromNode,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNode.getCoord(), toNode.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+                    } else if (intersection == 1){
+
+
+
+
+                        //find intersecting links
+                        Link linkExisting = network.getLinks().get(Id.createLinkId(intLinkId));
+                        Node fromNodeExisting = linkExisting.getFromNode();
+                        Node toNodeExisting = linkExisting.getToNode();
+                        Link linkExistingOp = NetworkUtils.getConnectingLink(toNodeExisting, fromNodeExisting);
+
+
+
+                        //find intersection point
+
+                        //find the intersection and add the new node
+                        //1: from Node
+                        double x1 = fromNode.getCoord().getX();
+                        double y1 = fromNode.getCoord().getY();
+                        //2: to Node
+                        double x2 = toNode.getCoord().getX();
+                        double y2 = toNode.getCoord().getY();
+
+                        //3: from Node existing
+                        double x3 = fromNodeExisting.getCoord().getX();
+                        double y3 = fromNodeExisting.getCoord().getY();
+                        //4 to Node existing
+                        double x4 = toNodeExisting.getCoord().getX();
+                        double y4 = toNodeExisting.getCoord().getY();
+
+
+
+                        //slope of line between the two new nodes
+                        double m12 = (y2 - y1) / (x2 - x1);
+                        //slope of line 3-4
+                        double m34 = (y4 - y3) / (x4 - x3);
+                        //coordinates of the intersection
+                        double x5 = (y3 - y1 - m34 * x3 + m12 * x1) / (m12 - m34);
+                        double y5 = y1 + m12 * (x5 - x1);
+                        //and check that it is inside the links
+
+                        Coord coordIntersection = new Coord(x5, y5);
+                        String intersectionNodeId = fromNodeId + "-" +  toNodeId;
+                        Node nodeIntersection = NetworkUtils.createNode(Id.createNodeId(intersectionNodeId), coordIntersection);
+                        network.addNode(nodeIntersection);
+
+
+                        //log.info(x5);
+                        //log.info(y5);
+                        //create new links
+                        //new network links
+                        Link link;
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId + "_1"),
+                                fromNode,
+                                nodeIntersection,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNode.getCoord(), nodeIntersection.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId + "_1op"),
+                                nodeIntersection,
+                                fromNode,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNode.getCoord(), nodeIntersection.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId + "_2"),
+                                nodeIntersection,
+                                toNode,
+                                network,
+                                NetworkUtils.getEuclideanDistance(nodeIntersection.getCoord(), toNode.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(newLinkId + "_2op"),
+                                toNode,
+                                nodeIntersection,
+                                network,
+                                NetworkUtils.getEuclideanDistance(nodeIntersection.getCoord(), toNode.getCoord()),
+                                freeSpeed,
+                                capacity,
+                                lanes);
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(linkExisting + "_3"),
+                                fromNodeExisting,
+                                nodeIntersection,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNodeExisting.getCoord(), nodeIntersection.getCoord()),
+                                linkExisting.getFreespeed(),
+                                linkExisting.getCapacity(),
+                                linkExisting.getNumberOfLanes());
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(linkExistingOp + "_3op"),
+                                nodeIntersection,
+                                fromNodeExisting,
+                                network,
+                                NetworkUtils.getEuclideanDistance(fromNodeExisting.getCoord(), nodeIntersection.getCoord()),
+                                linkExistingOp.getFreespeed(),
+                                linkExistingOp.getCapacity(),
+                                linkExistingOp.getNumberOfLanes());
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(linkExisting + "_4"),
+                                nodeIntersection,
+                                toNodeExisting,
+                                network,
+                                NetworkUtils.getEuclideanDistance(nodeIntersection.getCoord(), toNodeExisting.getCoord()),
+                                linkExisting.getFreespeed(),
+                                linkExisting.getCapacity(),
+                                linkExisting.getNumberOfLanes());
+
+                        network.addLink(link);
+
+                        link = NetworkUtils.createLink(Id.createLinkId(linkExistingOp + "_4op"),
+                                toNodeExisting,
+                                nodeIntersection,
+                                network,
+                                NetworkUtils.getEuclideanDistance(nodeIntersection.getCoord(), toNodeExisting.getCoord()),
+                                linkExistingOp.getFreespeed(),
+                                linkExistingOp.getCapacity(),
+                                linkExistingOp.getNumberOfLanes());
+
+                        network.addLink(link);
+
+                        //remove old links
+                        network.removeLink(linkExisting.getId());
+                        network.removeLink(linkExistingOp.getId());
+
+                    }
+
+                }
+                lineIndex++;
+            }
+
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (br != null) {
+                try {
+                    br.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+        }
+    }
+
 }
